@@ -1,184 +1,187 @@
--- AIM LOCK PRO v1.4 - Cải thiện GUI bo tròn và nút bấm On/Off
--- Mục tiêu: Tạo GUI bo tròn, màu đen, với nút bấm On/Off.
+-- AIM LOCK PRO v2.0 - by An (Original GUI with iPhone-like Rounded Corners, Instant Aim Lock, HP Display)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
+local CoreGui = game:GetService("CoreGui")
 
---------------------------------------------------------------------------------
--- Cấu hình (Có thể điều chỉnh)
---------------------------------------------------------------------------------
-local settings = {
-    keyToToggle = Enum.KeyCode.Q,       -- Phím tắt để bật/tắt aim lock
-    aimlockSpeed = 0.1,                -- Tốc độ quay camera (0.1 là vừa phải)
-    searchRadius = 250,                -- Bán kính tìm kiếm mục tiêu (tính bằng pixel trên màn hình)
-    espFillColor = Color3.fromRGB(255, 0, 0),
-    espOutlineColor = Color3.fromRGB(255, 255, 255),
-    guiPosition = UDim2.new(0.45, 0, 0.1, 0) -- Vị trí của nút GUI
+-- Cài đặt có thể tùy chỉnh
+local Settings = {
+	AimlockEnabled = false,
+	ESPEnabled = true,
+	MaxDistance = 500, -- Khoảng cách tối đa để khóa mục tiêu
+	LockPart = "Head", -- Bộ phận khóa: "Head" hoặc "HumanoidRootPart"
+	ToggleKey = Enum.KeyCode.Q, -- Phím bật/tắt aim lock
+	ESPColor = Color3.fromRGB(255, 0, 0), -- Màu ESP
 }
 
---------------------------------------------------------------------------------
--- Biến trạng thái
---------------------------------------------------------------------------------
-local aimlockEnabled = false
 local lockedTarget = nil
 local currentESP = nil
-local toggleBtn, targetLabel -- Khai báo các biến ở đây
 
---------------------------------------------------------------------------------
--- Hàm tiện ích
---------------------------------------------------------------------------------
+-- GUI setup (giữ giao diện gốc)
+local gui = Instance.new("ScreenGui")
+gui.Name = "AimLockGUI"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
 
-local function createESP(targetChar)
-    local esp = Instance.new("Highlight")
-    esp.Name = "LockESP"
-    esp.FillColor = settings.espFillColor
-    esp.OutlineColor = settings.espOutlineColor
-    esp.FillTransparency = 0.5
-    esp.OutlineTransparency = 0
-    esp.Adornee = targetChar
-    esp.Parent = CoreGui
-    return esp
-end
+-- Nút bật/tắt aim lock
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 100, 0, 50)
+toggleBtn.Position = UDim2.new(0.45, 0, 0.1, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Text = "off"
+toggleBtn.Font = Enum.Font.SourceSansSemibold
+toggleBtn.TextSize = 18
+toggleBtn.Active = true
+toggleBtn.Draggable = true
+toggleBtn.Parent = gui
 
-local function removeESP()
-    if currentESP then
-        currentESP:Destroy()
-        currentESP = nil
-    end
-end
+-- Thêm UICorner cho toggleBtn
+local toggleBtnCorner = Instance.new("UICorner")
+toggleBtnCorner.CornerRadius = UDim.new(0, 10) -- Bo tròn giống iPhone
+toggleBtnCorner.Parent = toggleBtn
 
-local function getTarget()
-    local closest, closestDist = nil, math.huge
-    local myChar = player.Character
-    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return nil end
-    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+-- Nhãn hiển thị mục tiêu và HP
+local targetLabel = Instance.new("TextLabel")
+targetLabel.Size = UDim2.new(0, 300, 0, 25)
+targetLabel.Position = UDim2.new(0.35, 0, 0.17, 0)
+targetLabel.BackgroundTransparency = 1
+targetLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+targetLabel.Text = ""
+targetLabel.Font = Enum.Font.SourceSansSemibold
+targetLabel.TextSize = 16
+targetLabel.Parent = gui
 
-    for _, other in ipairs(Players:GetPlayers()) do
-        if other ~= player and other.Character and other.Character:FindFirstChild("HumanoidRootPart") then
-            local part = other.Character.HumanoidRootPart
-            local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
-            local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-
-            if onScreen and screenDist < settings.searchRadius and screenDist < closestDist then
-                closest = other
-                closestDist = screenDist
-            end
-        end
-    end
-    return closest
-end
-
--- Cập nhật trạng thái và GUI khi aim lock được bật/tắt
-local function toggleAimlock()
-    aimlockEnabled = not aimlockEnabled
-    
-    if aimlockEnabled then
-        toggleBtn.Text = "On"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 255, 30) -- Màu xanh lá khi bật
-        toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    else
-        lockedTarget = nil
-        removeESP()
-        toggleBtn.Text = "Off"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40) -- Màu đen khi tắt
-        toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        targetLabel.Text = ""
-    end
-end
-
--- Tạo GUI với nút bấm On/Off
-local function createGUI()
-    local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
-    gui.Name = "AimLockGUI"
-    gui.ResetOnSpawn = false
-
-    toggleBtn = Instance.new("TextButton")
-    toggleBtn.Size = UDim2.new(0, 100, 0, 50)
-    toggleBtn.Position = settings.guiPosition
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40) -- Màu đen mặc định
-    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toggleBtn.Text = "Off"
-    toggleBtn.Parent = gui
-    toggleBtn.Draggable = true
-    toggleBtn.Active = true
-    toggleBtn.Font = Enum.Font.SourceSansBold
-    toggleBtn.TextSize = 20
-
-    -- Bo tròn góc cho nút
-    local corner = Instance.new("UICorner", toggleBtn)
-    corner.CornerRadius = UDim.new(0.25, 0) -- Độ bo tròn vừa phải
-
-    targetLabel = Instance.new("TextLabel", gui)
-    targetLabel.Size = UDim2.new(0, 300, 0, 25)
-    targetLabel.Position = UDim2.new(0.35, 0, 0.17, 0)
-    targetLabel.BackgroundTransparency = 1
-    targetLabel.TextColor3 = Color3.new(1, 0.3, 0.3)
-    targetLabel.Text = ""
-end
-
--- Marker để đánh dấu mục tiêu
+-- Marker cho mục tiêu
 local marker = Instance.new("BillboardGui")
 marker.Size = UDim2.new(0, 10, 0, 10)
 marker.AlwaysOnTop = true
 marker.Enabled = false
 local dot = Instance.new("Frame", marker)
 dot.Size = UDim2.new(1, 0, 1, 0)
-dot.BackgroundColor3 = Color3.new(1, 0, 0)
+dot.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
 dot.BorderSizePixel = 0
+-- Thêm UICorner cho dot
+local dotCorner = Instance.new("UICorner")
+dotCorner.CornerRadius = UDim.new(0.5, 0) -- Hình tròn hoàn toàn
+dotCorner.Parent = dot
+marker.Parent = CoreGui
 
---------------------------------------------------------------------------------
--- Khởi tạo và Kết nối sự kiện
---------------------------------------------------------------------------------
+-- Tạo ESP highlight
+local function createESP(targetChar)
+	if not Settings.ESPEnabled then return nil end
+	local esp = Instance.new("Highlight")
+	esp.Name = "LockESP"
+	esp.FillColor = Settings.ESPColor
+	esp.OutlineColor = Color3.fromRGB(255, 255, 255)
+	esp.FillTransparency = 0.5
+	esp.OutlineTransparency = 0
+	esp.Adornee = targetChar
+	esp.Parent = CoreGui
+	return esp
+end
 
-createGUI()
+-- Xóa ESP
+local function removeESP()
+	if currentESP then
+		currentESP:Destroy()
+		currentESP = nil
+	end
+end
 
-toggleBtn.MouseButton1Click:Connect(toggleAimlock)
+-- Tìm mục tiêu gần nhất
+local function getTarget()
+	local closest, closestDist = nil, math.huge
+	local myChar = player.Character
+	if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return nil end
+	local myPos = myChar.HumanoidRootPart.Position
+	local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
 
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.KeyCode == settings.keyToToggle then
-        toggleAimlock()
-    end
+	for _, other in pairs(Players:GetPlayers()) do
+		if other ~= player and other.Character and other.Character:FindFirstChild("HumanoidRootPart") then
+			local part = other.Character:FindFirstChild(Settings.LockPart) or other.Character.HumanoidRootPart
+			local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
+			local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+			local worldDist = (myPos - part.Position).Magnitude
+
+			if onScreen and screenDist < closestDist and worldDist <= Settings.MaxDistance then
+				closest = other
+				closestDist = screenDist
+			end
+		end
+	end
+
+	return closest
+end
+
+-- Xử lý nút bật/tắt aim lock
+toggleBtn.MouseButton1Click:Connect(function()
+	Settings.AimlockEnabled = not Settings.AimlockEnabled
+	toggleBtn.Text = Settings.AimlockEnabled and "on" or "off"
+	if not Settings.AimlockEnabled then
+		lockedTarget = nil
+		removeESP()
+		marker.Enabled = false
+		targetLabel.Text = ""
+	end
 end)
 
-RunService.Heartbeat:Connect(function()
-    if not aimlockEnabled then 
-        marker.Enabled = false
-        return 
-    end
+-- Xử lý phím tắt
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Settings.ToggleKey then
+		Settings.AimlockEnabled = not Settings.AimlockEnabled
+		toggleBtn.Text = Settings.AimlockEnabled and "on" or "off"
+		if not Settings.AimlockEnabled then
+			lockedTarget = nil
+			removeESP()
+			marker.Enabled = false
+			targetLabel.Text = ""
+		end
+	end
+end)
 
-    if not lockedTarget or not lockedTarget.Character or not lockedTarget.Character:FindFirstChild("HumanoidRootPart") then
-        removeESP()
-        lockedTarget = getTarget()
+-- Cập nhật aim lock
+RunService.RenderStepped:Connect(function()
+	if not Settings.AimlockEnabled then return end
 
-        if lockedTarget and lockedTarget.Character then
-            removeESP()
-            currentESP = createESP(lockedTarget.Character)
-        end
-    end
+	-- Kiểm tra và cập nhật mục tiêu
+	if not lockedTarget or not lockedTarget.Character or not lockedTarget.Character:FindFirstChild(Settings.LockPart) then
+		lockedTarget = getTarget()
+		removeESP()
+		if lockedTarget and lockedTarget.Character then
+			currentESP = createESP(lockedTarget.Character)
+		end
+	end
 
-    if lockedTarget and lockedTarget.Character and lockedTarget.Character:FindFirstChild("HumanoidRootPart") then
-        local part = lockedTarget.Character.HumanoidRootPart
-        local camPos = camera.CFrame.Position
-        local targetPos = part.Position
+	-- Xử lý khóa mục tiêu
+	if lockedTarget and lockedTarget.Character and lockedTarget.Character:FindFirstChild(Settings.LockPart) then
+		local part = lockedTarget.Character:FindFirstChild(Settings.LockPart) or lockedTarget.Character.HumanoidRootPart
+		local camPos = camera.CFrame.Position
+		local targetPos = part.Position
 
-        camera.CFrame = camera.CFrame:Lerp(CFrame.new(camPos, targetPos), settings.aimlockSpeed)
+		-- Aim lock tức thì (khóa cứng, không mượt)
+		camera.CFrame = CFrame.new(camPos, targetPos)
 
-        marker.Adornee = part
-        if not marker.Parent then
-            marker.Parent = CoreGui
-        end
-        marker.Enabled = true
+		-- Cập nhật marker
+		marker.Adornee = part
+		marker.Enabled = true
 
-        targetLabel.Text = "Locking: " .. lockedTarget.Name
-    else
-        removeESP()
-        marker.Enabled = false
-        targetLabel.Text = ""
-    end
+		-- Hiển thị tên và HP
+		local humanoid = lockedTarget.Character:FindFirstChild("Humanoid")
+		if humanoid then
+			local health = math.floor(humanoid.Health + 0.5) -- Làm tròn số máu
+			local maxHealth = math.floor(humanoid.MaxHealth + 0.5)
+			targetLabel.Text = "Locking: " .. lockedTarget.Name .. " (HP: " .. health .. "/" .. maxHealth .. ")"
+		else
+			targetLabel.Text = "Locking: " .. lockedTarget.Name .. " (HP: N/A)"
+		end
+	else
+		removeESP()
+		marker.Enabled = false
+		targetLabel.Text = ""
+	end
 end)
